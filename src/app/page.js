@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-// ลบ import FFmpeg บรรทัดบนออก เพื่อไม่ให้ Server โหลด
+// เราจะใช้ fetchFile สำหรับโหลด Font จาก URL เท่านั้น
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { Upload, Film, Download, Settings, Play, Loader2 } from 'lucide-react';
 
@@ -15,17 +15,15 @@ export default function Home() {
   const [fps, setFps] = useState(30);
   const [outputVideo, setOutputVideo] = useState(null);
   
-  // เปลี่ยนจาก new FFmpeg() เป็น null ก่อน เพื่อไม่ให้ Error ตอน Build
   const ffmpegRef = useRef(null);
   const messageRef = useRef(null);
 
   const load = async () => {
-    // Import FFmpeg ตรงนี้แทน (Dynamic Import) เพื่อให้โหลดเฉพาะตอนอยู่บน Browser เท่านั้น
+    // Dynamic import เพื่อป้องกัน Error ตอน Build บน Vercel
     const { FFmpeg } = await import('@ffmpeg/ffmpeg');
     
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     
-    // สร้าง instance ตรงนี้
     ffmpegRef.current = new FFmpeg();
     const ffmpeg = ffmpegRef.current;
 
@@ -48,11 +46,24 @@ export default function Home() {
   };
 
   useEffect(() => {
-    // เช็คว่ารันบน Browser จริงๆ ถึงค่อยโหลด
     if (typeof window !== 'undefined') {
         load();
     }
   }, []);
+
+  // ฟังก์ชันอ่านไฟล์แบบ Manual (แก้ปัญหา File could not be read)
+  const readFileData = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            resolve(new Uint8Array(reader.result));
+        };
+        reader.onerror = (error) => {
+            reject(error);
+        };
+        reader.readAsArrayBuffer(file);
+    });
+  };
 
   const processVideo = async () => {
     if (!videoFile || !subFile || !ffmpegRef.current) return;
@@ -63,10 +74,15 @@ export default function Home() {
     const ffmpeg = ffmpegRef.current;
 
     try {
-        await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
-        await ffmpeg.writeFile('subs.srt', await fetchFile(subFile));
+        // ใช้ฟังก์ชันอ่านไฟล์ใหม่ที่เขียนเอง แทน fetchFile เดิม
+        const videoData = await readFileData(videoFile);
+        const subData = await readFileData(subFile);
 
-        // Font ภาษาไทย
+        await ffmpeg.writeFile('input.mp4', videoData);
+        await ffmpeg.writeFile('subs.srt', subData);
+
+        // ส่วน Font ยังใช้ fetchFile ได้เพราะเป็นการโหลดจาก URL
+        setStatusMessage('กำลังโหลด Font ภาษาไทย...');
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Regular.ttf';
         await ffmpeg.writeFile('/tmp/Sarabun-Regular.ttf', await fetchFile(fontUrl));
 
@@ -77,10 +93,11 @@ export default function Home() {
             '-vf', `subtitles=subs.srt:fontsdir=/tmp:force_style='FontName=Sarabun,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1'`,
             '-r', fps.toString(),
             '-c:a', 'copy',
+            '-preset', 'ultrafast', // เพิ่มความเร็วในการประมวลผล
             'output.mp4'
         ]);
 
-        setStatusMessage('เสร็จสิ้น! สร้างไฟล์ดาวน์โหลด...');
+        setStatusMessage('เสร็จสิ้น! กำลังสร้างไฟล์ดาวน์โหลด...');
 
         const data = await ffmpeg.readFile('output.mp4');
         const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
@@ -89,7 +106,7 @@ export default function Home() {
 
     } catch (error) {
         console.error(error);
-        setStatusMessage('เกิดข้อผิดพลาด: ' + error.message);
+        setStatusMessage('เกิดข้อผิดพลาด: ' + (error.message || error));
     } finally {
         setIsLoading(false);
     }
