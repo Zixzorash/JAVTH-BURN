@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
+// ลบ import FFmpeg บรรทัดบนออก เพื่อไม่ให้ Server โหลด
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { Upload, Film, Download, Settings, Play, Loader2 } from 'lucide-react';
 
@@ -15,11 +15,18 @@ export default function Home() {
   const [fps, setFps] = useState(30);
   const [outputVideo, setOutputVideo] = useState(null);
   
-  const ffmpegRef = useRef(new FFmpeg());
+  // เปลี่ยนจาก new FFmpeg() เป็น null ก่อน เพื่อไม่ให้ Error ตอน Build
+  const ffmpegRef = useRef(null);
   const messageRef = useRef(null);
 
   const load = async () => {
+    // Import FFmpeg ตรงนี้แทน (Dynamic Import) เพื่อให้โหลดเฉพาะตอนอยู่บน Browser เท่านั้น
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+    
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    
+    // สร้าง instance ตรงนี้
+    ffmpegRef.current = new FFmpeg();
     const ffmpeg = ffmpegRef.current;
 
     ffmpeg.on('log', ({ message }) => {
@@ -41,11 +48,14 @@ export default function Home() {
   };
 
   useEffect(() => {
-    load();
+    // เช็คว่ารันบน Browser จริงๆ ถึงค่อยโหลด
+    if (typeof window !== 'undefined') {
+        load();
+    }
   }, []);
 
   const processVideo = async () => {
-    if (!videoFile || !subFile) return;
+    if (!videoFile || !subFile || !ffmpegRef.current) return;
     setIsLoading(true);
     setOutputVideo(null);
     setStatusMessage('กำลังอ่านไฟล์...');
